@@ -43,8 +43,8 @@ provided, using the user password or password hash.
 **winwifidec.py**: this utility (formerly called wiffy.py) decrypts Windows WiFi
 password, which are (usually) system wide. To decrypt them you need: the 
 DPAPI system key, which is one of the OS LSA secrets; the system MasterKeys, 
-stored in  ``\Windows\System32\Microsoft\Protect\S-1-5-18\User``; the WiFi xml 
-files' directory,  ``\ProgramData\Microsoft\WwanSvc\Profiles``.
+stored in  ``\Windows\System32\Microsoft\Protect\S-1-5-18\User``; the WiFi
+directory, ``\ProgramData\Microsoft\WwanSvc\Profiles``.
 
 Licensing and Copyright
 -----------------------
