@@ -23,39 +23,29 @@ package from https://bitbucket.org/jmichel/dpapick. Since I sometimes change
 dpapick, I did not install it and, when in need, I set then environment 
 variable *PYTHONPATH*.
 
-**blobinfo.py**
+**blobinfo.py**: this small utility simply tries to parse a DPAPI BLOB file.
 
-This small utility simply tries to parse a DPAPI BLOB file.
+**blobsdec.py**: this utility tries to unlock (decrypt) a *system* DPAPI BLOB
+file provided, using DPAPI system key stored in LSA secrets.
 
-**blobsdec.py**
+**blobudec.py**: this utility tries to unlock (decrypt) the *user* DPAPI BLOB
+file provided, using the user password or password hash.
 
-This utility tries to unlock (decrypt) a *system* DPAPI BLOB file provided,
-using DPAPI system key stored in LSA secrets.
+**mkinfo.py**: this small utility simply tries to parse a MasterKey file or a
+directory containing MasterKey files.
 
-**blobudec.py**
+**mksdec.py**: this utility tries to unlock (decrypt) the *system* MasterKey
+files provided, using DPAPI system key stored in LSA secrets.
 
-This utility tries to unlock (decrypt) the *user* DPAPI BLOB file provided,
-using the user password or password hash.
+**mkudec.py**: this utility tries to unlock (decrypt) the *user* MasterKey files
+provided, using the user password or password hash.
 
-**mkinfo.py**
-
-This small utility simply tries to parse a MasterKey file or a directory 
-containing MasterKey files.
-
-**mksdec.py**
-
-This utility tries to unlock (decrypt) the *system* MasterKey files provided,
-using DPAPI system key stored in LSA secrets.
-
-**mkudec.py**
-
-This utility tries to unlock (decrypt) the *user* MasterKey files provided,
-using the user password or password hash.
-
-**winwifidec.py**
-
-This utility (formerly called wiffy.py) decrypts Windows WiFi password. These credentials are (usually) system wide, so the OS is able to decrypt it even  when no users are logged in. To decrypt them you need: the DPAPI system key, which is one of the OS LSA secrets; the system MasterKeys, stored in <\Windows\System32\Microsoft\Protect\S-1-5-18\User>; the WiFi xml files'
-directory, <\ProgramData\Microsoft\WwanSvc\Profiles>.
+**winwifidec.py**: this utility (formerly called wiffy.py) decrypts Windows WiFi
+password. These credentials are (usually) system wide, so the OS is able to 
+decrypt it even  when no users are logged in. To decrypt them you need: the 
+DPAPI system key, which is one of the OS LSA secrets; the system MasterKeys, 
+stored in <\Windows\System32\Microsoft\Protect\S-1-5-18\User>; the WiFi xml 
+files' directory, <\ProgramData\Microsoft\WwanSvc\Profiles>.
 
 Licensing and Copyright
 -----------------------
