@@ -59,11 +59,11 @@ if __name__ == '__main__':
 
     check_parameters(options, args)
 
-    if options.credhist:
-        addCredhistFile(options.sid, options.credhist)
-
     mkp = masterkey.MasterKeyPool()
     mkp.loadDirectory(options.masterkeydir)
+
+    if options.credhist:
+        mkp.addCredhistFile(options.sid, options.credhist)
 
     if options.password:
         mkp.try_credential(options.sid, options.password)
