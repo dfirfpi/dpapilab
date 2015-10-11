@@ -57,6 +57,22 @@ def FILETIME(name):
     return FileTimeAdapter(construct.ULInt64(name))
 
 
+class BytesHexAdapter(construct.Adapter):
+    '''Hex encoding output.'''
+    def _decode(self, obj, context):
+        return obj.encode('hex')
+
+
+class UnicodeOrHexAdapter(construct.Adapter):
+    '''Helper to pretty print string/hex and remove trailing zeroes.'''
+    def _decode(self, obj, context):
+        try:
+            decoded = obj.decode('utf16')
+            decoded = decoded.rstrip('\00').encode('utf8')
+        except UnicodeDecodeError:
+            decoded = obj.encode('hex')
+        return decoded
+
 # Common structs.
 
 UNICODE_STRING = construct.Struct(
@@ -64,11 +80,15 @@ UNICODE_STRING = construct.Struct(
     construct.ULInt32('length'),
     construct.String('data', lambda ctx: ctx.length, encoding='utf16'))
 
-
+UNICODE_STRING_HEX = construct.Struct(
+    'UNICODE_STRING_HEX',
+    construct.ULInt32('length'),
+    UnicodeOrHexAdapter(construct.Bytes('data', lambda ctx: ctx.length)))
+    
 SIZED_DATA = construct.Struct(
     'SIZED_DATA',
     construct.ULInt32('size'),
-    construct.Bytes('data', lambda ctx: ctx.size)
+    BytesHexAdapter(construct.Bytes('data', lambda ctx: ctx.size))
 )
 
 # DPAPI structs.
@@ -298,21 +318,60 @@ VAULT_ATTRIBUTE = construct.Struct(
     construct.ULInt32('attr_unknown_1'),
     construct.ULInt32('attr_unknown_2'),
     construct.ULInt32('attr_unknown_3'),
-    # Ok, this is bad, but till now I have not understood how to distinguish
-    # the different structs used. Actually the last ATTRIBUTE is different.
-    # Usually we have 6 more bytes zeroed, not always aligned: otherwise,
-    # if id >= 100, we have 4 more bytes: weird.
     construct.Optional(
-        construct.Const(construct.Bytes('padding', 6), '\x00'*6)),
-    construct.If(
-        lambda ctx: not ctx.padding and ctx.id >= 0x64,
-        construct.ULInt32('attr_unknown_4')
+        construct.Const(construct.Bytes('padding', 6), '\x00'*6)
     ),
     construct.ULInt32('size'),
     construct.If(
         lambda ctx: ctx.size > 0,
-        construct.Embed(VAULT_ATTRIBUTE_ENCRYPTED)),
-    construct.Anchor('stream_end')
+        construct.Embed(VAULT_ATTRIBUTE_ENCRYPTED)
+    )
+)
+
+'''
+VAULT_ATTRIBUTE_EX = construct.Struct(
+    'VAULT_ATTRIBUTE_EX',
+    construct.ULInt32('id'),
+    construct.ULInt32('attr_unknown_1'),
+    construct.ULInt32('attr_unknown_2'),
+    construct.ULInt32('attr_unknown_3'),
+    construct.ULInt32('attr_unknown_4'),
+    construct.Anchor('attr_stream_pos'),
+    construct.If(
+        lambda ctx: ctx.attr_stream_pos % 8,
+        construct.Bytes('padding',
+            lambda ctx: 8 - ctx.attr_stream_pos % 8
+        )
+    ),
+    construct.ULInt32('size'),
+    construct.If(
+        lambda ctx: ctx.size > 0,
+        construct.Embed(VAULT_ATTRIBUTE_ENCRYPTED)
+    ),
+    construct.Anchor('attr_ex_pos')
+)
+'''
+
+VAULT_ATTRIBUTE_EX = construct.Struct(
+    'VAULT_ATTRIBUTE_EX',
+    construct.ULInt32('id'),
+    construct.ULInt32('attr_unknown_1'),
+    construct.ULInt32('attr_unknown_2'),
+    construct.ULInt32('attr_unknown_3'),
+    construct.ULInt32('attr_unknown_4'),
+    construct.Anchor('attr_stream_pos'),
+    construct.If(
+        lambda ctx: ctx.attr_stream_pos % 8,
+        construct.Bytes('padding',
+            lambda ctx: 8 - ctx.attr_stream_pos % 8
+        )
+    ),
+    construct.ULInt32('size'),
+    construct.If(
+        lambda ctx: ctx.size > 0,
+        construct.Embed(VAULT_ATTRIBUTE_ENCRYPTED)
+    ),
+    construct.Anchor('attr_ex_pos')
 )
 
 VAULT_ATTRIBUTE_EXTRA = construct.Struct(
@@ -320,15 +379,46 @@ VAULT_ATTRIBUTE_EXTRA = construct.Struct(
 	construct.ULInt32('id'),
     construct.ULInt32('attr_unknown_1'),
     construct.ULInt32('attr_unknown_2'),
-    construct.Embed(SIZED_DATA)
+    construct.ULInt32('size'),
+    construct.If(
+        lambda ctx: ctx.size > 0,
+        construct.Embed(VAULT_ATTRIBUTE_ENCRYPTED)
+    )
+)
+
+# VCRD Mapping.
+
+VAULT_ATTRIBUTE_MAP_COMMON = construct.Struct(
+    'VAULT_ATTRIBUTE_MAP_COMMON',
+    construct.ULInt32('id'),
+    construct.ULInt32('offset'),
+    construct.ULInt32('attr_map_common_unknown_1')
 )
 
 VAULT_ATTRIBUTE_MAP_ENTRY = construct.Struct(
     'VAULT_ATTRIBUTE_MAP_ENTRY',
-    construct.ULInt32('id'),
-    construct.ULInt32('offset'),
-    construct.ULInt32('attr_map_entry_unknown_1'),
+    construct.Embed(VAULT_ATTRIBUTE_MAP_COMMON),
     construct.Pointer(lambda ctx: ctx.offset, VAULT_ATTRIBUTE)
+)
+
+VAULT_ATTRIBUTE_MAP_LAST = construct.Struct(
+    'VAULT_ATTRIBUTE_MAP_LAST',
+    construct.Embed(VAULT_ATTRIBUTE_MAP_COMMON),
+    construct.Pointer(lambda ctx: ctx.offset, VAULT_ATTRIBUTE_EX)
+)
+
+# Ok, this is bad, but till now I have not understood how to distinguish
+# the different structs used. Actually the last ATTRIBUTE is different.
+
+VAULT_ATTRIBUTES_MAP = construct.Struct(
+    'VAULT_ATTRIBUTES_MAP',
+    construct.Rename(
+        'entries',
+        construct.Array(
+            lambda ctx: ctx.attributes_num,
+            VAULT_ATTRIBUTE_MAP_ENTRY
+        )
+    )
 )
 
 VAULT_VCRD = construct.Struct(
@@ -343,13 +433,42 @@ VAULT_VCRD = construct.Struct(
     construct.Value(
         'attributes_num',
         lambda ctx: (
-            ctx.attributes_array_size / VAULT_ATTRIBUTE_MAP_ENTRY.sizeof())),
-    construct.Rename(
-        'attributes',
-        construct.Array(
-            lambda ctx: ctx.attributes_num, VAULT_ATTRIBUTE_MAP_ENTRY)),
-    construct.Pointer(
-        lambda ctx: (
-            ctx.attributes[ctx.attributes_num-1].VAULT_ATTRIBUTE.stream_end),
-        construct.Rename('extra_entry', VAULT_ATTRIBUTE_EXTRA))
+            ctx.attributes_array_size / VAULT_ATTRIBUTE_MAP_ENTRY.sizeof())
+    ),
+    construct.If(
+        lambda ctx: ctx.attributes_num > 0,
+        construct.Embed(VAULT_ATTRIBUTES_MAP)
+    ),
+    construct.Optional(
+        construct.Pointer(
+            lambda ctx: ctx.last_entry.VAULT_ATTRIBUTE_EX.attr_ex_pos,
+            construct.Rename('extra_entry', VAULT_ATTRIBUTE_EXTRA)
+        )
+    )
+)
+
+VAULT_ATTRIBUTE_ITEM = construct.Struct(
+    'VAULT_ATTRIBUTE_ITEM',
+    construct.ULInt32('id'),
+    construct.Switch(
+        'item',
+        lambda ctx: ctx.id,
+        {
+            1: construct.Rename('resource', UNICODE_STRING_HEX),
+            2: construct.Rename('identity', UNICODE_STRING_HEX),
+            3: construct.Rename('authenticator', UNICODE_STRING_HEX),
+        },
+        default = construct.Rename('generic', SIZED_DATA)
+    )
+)
+
+VAULT_ATTRIBUTE_EX_DECRYPTED = construct.Struct(
+    'VAULT_ATTRIBUTE_EX_DECRYPTED',
+    construct.ULInt32('version'),
+    construct.ULInt32('count'),
+    construct.ULInt32('vault_attr_ex_dec_unknown1'),
+    construct.Array(
+        lambda ctx: ctx.count,
+        VAULT_ATTRIBUTE_ITEM
+    )   
 )

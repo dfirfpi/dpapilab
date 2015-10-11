@@ -16,6 +16,7 @@
 # limitations under the License.
 """ Windows DPAPI system's MasterKeys decryption utility."""
 
+import hashlib
 import optparse
 import os
 import re
@@ -69,7 +70,9 @@ if __name__ == '__main__':
             print 'Working on MK GUID %s\n-------------' % mk.guid
             if mk.decrypted:
                 print 'MASTER KEY UNLOCKED!'
-                print mk
+                mkey = mk.get_key()
+                print 'KEY: %s' % mkey.encode('hex')
+                print 'SHA1: %s' % hashlib.sha1(mkey).digest().encode('hex')
             else:
                 print 'MK guid: %s' % mk.guid
                 print 'UNABLE to UNLOCK master key'

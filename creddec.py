@@ -36,15 +36,17 @@ except ImportError:
 
 def check_parameters(options, args):
     """Simple checks on the parameters set by the user."""
-    if not options.sid:
-        sys.exit('You must provide the user\'s SID textual string.')
-    if not options.masterkeydir:
+    if not options.masterkeydir and not options.sysmkdir:
         sys.exit('Cannot decrypt anything without master keys.')
-    if not options.password and not options.pwdhash:
+    if not options.sid and options.masterkeydir:
+        sys.exit('You must provide the user\'s SID textual string.')
+    if not options.password and not options.pwdhash and not options.system:
         sys.exit(
             'You must provide the user password or the user password hash. '
             'The user password hash is the SHA1(UTF_LE(password)), and must '
             'be provided as the hex textual string.')
+    if options.sysmkdir and (not options.system or not options.security):
+        sys.exit('You must provide SYSTEM and SECURITY hives')
     if not args:
         sys.exit('You must provide one credential file at least.')
 
@@ -59,11 +61,11 @@ def decrypt_blob(mkp, blob):
                 if blob.decrypted:
                     break
     else:
-        print >> sys.stderr, 'MasterKey not found for blob.'
+        return None, 1
 
     if blob.decrypted:
-        return blob.cleartext
-    return None
+        return blob.cleartext, 0
+    return None, 2
 
 
 def decrypt_credential_block(mkp, credential_block):
@@ -76,11 +78,21 @@ def decrypt_credential_block(mkp, credential_block):
     return decrypt_blob(mkp, sblob)
 
 
+def helper_dec_err(err_value):
+    if res == 1:
+        print >> sys.stderr, 'MasterKey not found for blob.'
+    elif res == 2:
+        print >> sys.stderr, 'Unable to decrypt blob.'
+    else:
+        print >> sys.stderr, 'Decryption error.'
+
+
 if __name__ == '__main__':
     """Utility core."""
     usage = (
         'usage: %prog [options] credential1 credential2 ...\n\n'
-        'It tries to decrypt *user* credential files.')
+        'It tries to decrypt user/system credential files.'
+        'Provide only system MK data for system credentials.')
 
     parser = optparse.OptionParser(usage=usage)
     parser.add_option('--sid', metavar='SID', dest='sid')
@@ -96,16 +108,19 @@ if __name__ == '__main__':
 
     check_parameters(options, args)
 
-    umkp = masterkey.MasterKeyPool()
-    umkp.loadDirectory(options.masterkeydir)
+    umkp = None
+    if options.masterkeydir:
+        umkp = masterkey.MasterKeyPool()
+        umkp.loadDirectory(options.masterkeydir)
+        if options.credhist:
+            umkp.addCredhistFile(options.sid, options.credhist)
+        if options.password:
+            umkp.try_credential(options.sid, options.password)
+        elif options.pwdhash:
+            umkp.try_credential_hash(
+                options.sid, options.pwdhash.decode('hex'))
 
-    if options.credhist:
-        umkp.addCredhistFile(options.sid, options.credhist)
-    if options.password:
-        umkp.try_credential(options.sid, options.password)
-    elif options.pwdhash:
-        umkp.try_credential_hash(options.sid, options.pwdhash.decode('hex'))
-
+    smkp = None
     if options.sysmkdir and options.system and options.security:
         reg = registry.Regedit()
         secrets = reg.get_lsa_secrets(options.security, options.system)
@@ -115,8 +130,6 @@ if __name__ == '__main__':
         smkp.addSystemCredential(dpapi_system)
         smkp.try_credential_hash(None, None)
         can_decrypt_sys_blob = True
-    else:
-        can_decrypt_sys_blob = False
 
     for cred_file in args:
         with open(cred_file, 'rb') as fin:
@@ -124,21 +137,27 @@ if __name__ == '__main__':
 
             enc_cred = vaultstruct.CREDENTIAL_FILE.parse(fin.read())
 
-            ublob = blob.DPAPIBlob(enc_cred.data.raw)
+            cred_blob = blob.DPAPIBlob(enc_cred.data.raw)
 
-            dec_cred = decrypt_blob(umkp, ublob)
+            if umkp:
+                dec_cred, res_err = decrypt_blob(umkp, cred_blob)
+            elif smkp:
+                dec_cred, res_err = decrypt_blob(smkp, cred_blob)
+            else:
+                sys.exit('No MasterKey pools available!')
+
             if not dec_cred:
-                print >> sys.stderr, 'Unable to decrypt blob %s' % cred_file
-                continue
+                helper_dec_err(res_err)
+                continue                 
 
             cred_dec = vaultstruct.CREDENTIAL_DECRYPTED.parse(dec_cred)
-
+            print cred_dec
             if cred_dec.header.unk_type == 3:
                 print cred_dec.header
                 print cred_dec.main
 
             elif cred_dec.header.unk_type == 2:
-                if can_decrypt_sys_blob:
+                if smkp:
                     cred_block_dec = decrypt_credential_block(smkp, cred_dec)
                     if not cred_block_dec:
                         print cred_dec
